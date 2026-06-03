@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Callisto\Sdk\Http;
 
 use Callisto\Sdk\Config;
+use Callisto\Sdk\ErrorReporter;
 use Callisto\Sdk\Exception\CallistoException;
 use Callisto\Sdk\Exception\NetworkException;
 use GuzzleHttp\Client as GuzzleClient;
@@ -18,8 +19,14 @@ final class Transport
     public function __construct(
         private readonly Config $config,
         ?GuzzleClient $http = null,
+        private readonly ?ErrorReporter $reporter = null,
     ) {
         $this->http = $http ?? new GuzzleClient();
+    }
+
+    public function reporter(): ?ErrorReporter
+    {
+        return $this->reporter;
     }
 
     /**
@@ -50,7 +57,14 @@ final class Transport
         try {
             $response = $this->http->request($method, $url, $options);
         } catch (TransferException $e) {
-            throw new NetworkException("Request to {$url} failed: " . $e->getMessage());
+            $error = new NetworkException("Request to {$url} failed: " . $e->getMessage());
+            $this->reporter?->captureException(
+                $error,
+                'error',
+                null,
+                ['method' => $method, 'path' => $path],
+            );
+            throw $error;
         }
 
         $status = $response->getStatusCode();
@@ -66,7 +80,14 @@ final class Transport
                 $header = $response->getHeaderLine('Retry-After');
                 $retryAfter = is_numeric($header) ? (int) $header : null;
             }
-            throw CallistoException::fromStatus($status, $message, $data, $retryAfter);
+            $error = CallistoException::fromStatus($status, $message, $data, $retryAfter);
+            $this->reporter?->captureException(
+                $error,
+                'error',
+                null,
+                ['method' => $method, 'path' => $path],
+            );
+            throw $error;
         }
 
         return $data;

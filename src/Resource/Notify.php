@@ -44,10 +44,12 @@ final class Notify
         ];
         $present = array_filter($blocks, static fn ($v) => !empty($v));
         if ($present === []) {
-            throw new ValidationException(
+            $error = new ValidationException(
                 'At least one event block (email, sms, mobile_push, web_push, '
                 . 'webhook, messaging, real_time) must be provided.'
             );
+            $this->transport->reporter()?->captureException($error);
+            throw $error;
         }
 
         return $this->transport->request('POST', '/notify/send', ['topic' => $topic] + $present);

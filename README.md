@@ -728,3 +728,76 @@ try {
     echo "API error ({$e->getStatusCode()}): {$e->getMessage()}";
 }
 ```
+
+## Error reporting
+
+The SDK ships an opt-in, Sentry-style error reporter that POSTs captured errors to a
+Callisto error-tracking **ingest endpoint**. It auto-captures the SDK's own
+`CallistoException`s (API + network + client-side validation) and exposes a public API so
+your application can report its own exceptions. Reporting is **fully disabled** unless a DSN
+is configured.
+
+> **Delivery is synchronous best-effort (PHP-specific).** PHP has no portable background
+> threads in a request context, so the reporter delivers each event **inline with a short
+> timeout (2s)**. Every failure — any exception, any non-202 — is swallowed. Reporting never
+> alters or blocks the original error path, and `captureException`/`captureMessage` never throw.
+
+### Enabling
+
+Pass a DSN (constructor argument or env var). The DSN **is** the full ingest URL
+(`{APP_URL}/ingest/{id}?key={public_key}`):
+
+```php
+use Callisto\Sdk\Client;
+
+$callisto = new Client(
+    clientId: 'your-client-id',
+    apiKey: 'your-api-key',
+    errorDsn: 'https://app.callistosignal.com/ingest/<uuid>?key=<hex>', // enables reporting
+    captureUnhandled: true,        // optional, default false — install global handler
+    environment: 'production',     // optional, tagged in context.environment
+);
+```
+
+### Environment variables
+
+When the corresponding argument is omitted (or `null`), it is resolved from the environment:
+
+| Argument           | Env var                      | Default | Meaning                                                     |
+| ------------------ | ---------------------------- | ------- | ---------------------------------------------------------- |
+| `errorDsn`         | `CALLISTO_ERROR_DSN`         | none    | Ingest DSN. Absent (or not a valid URL) → reporting disabled (no-op). |
+| `captureUnhandled` | `CALLISTO_CAPTURE_UNHANDLED` | `false` | Install the global unhandled-exception / fatal handler.    |
+| `environment`      | `CALLISTO_ENVIRONMENT`       | none    | Optional tag included in `context.environment`.            |
+
+### Public API
+
+```php
+// Report your own exceptions and messages.
+$callisto->captureException($throwable, level: 'error', extra: ['feature' => 'checkout']);
+$callisto->captureMessage('payment retried', level: 'info');
+
+// Attach user context to subsequent events (pass null to clear).
+$callisto->setUser(['id' => 'u-123', 'email' => 'user@example.com']);
+
+// Best-effort flush (no-op for the synchronous PHP reporter).
+$callisto->flush();
+
+// Advanced: the reporter itself.
+$reporter = $callisto->errorReporter();
+```
+
+`level` is constrained to `fatal | error | warning | info` (anything else falls back to `error`).
+
+### Opt-in global handler
+
+When `captureUnhandled` is `true` **and** a DSN is set, the client installs
+`set_exception_handler` and a `register_shutdown_function` (for fatal errors) that report at
+level `fatal`. Both **chain** any previously-registered handler / preserve PHP's default
+behavior (the exception is still re-raised), so they never clobber existing error handling.
+
+### PII guarantee
+
+The reporter **never transmits** your `clientId`, `apiKey`, the `Authorization` header, or the
+**outgoing request body** (which carries phone numbers and message content). Only the server's
+error response `body`, `status_code`, the HTTP `method`, and the request `path` may leave the
+process. This is enforced and covered by tests.

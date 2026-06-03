@@ -32,7 +32,9 @@ final class Otp
     ): array {
         $providerValue = $provider instanceof OtpProvider ? $provider->value : $provider;
         if ($providerValue === OtpProvider::Whatsapp->value && !$instanceCode) {
-            throw new ValidationException('instance_code is required when provider is whatsapp');
+            $error = new ValidationException('instance_code is required when provider is whatsapp');
+            $this->transport->reporter()?->captureException($error);
+            throw $error;
         }
 
         $body = ['to' => $to, 'message' => $message];
