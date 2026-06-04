@@ -1,6 +1,9 @@
 # callisto/sdk (PHP)
 
-Official Callisto messaging API SDK for PHP 8.1+.
+Official Callisto Signal SDK for PHP 8.1+. Two capabilities in one package:
+
+- **Messaging API** — SMS, OTP, WhatsApp, Notify, and balance, over a typed, Guzzle-backed client. See [Quick start](#quick-start) and [Resources](#resources).
+- **Error tracking** — opt-in, Sentry-style exception reporting with a source window on the failing line, plus drop-in **Laravel, Symfony and BowPHP** integrations. See [Error reporting](#error-reporting) → [Framework integration](#framework-integration).
 
 ## Requirements
 
@@ -737,6 +740,12 @@ Callisto error-tracking **ingest endpoint**. It auto-captures the SDK's own
 your application can report its own exceptions. Reporting is **fully disabled** unless a DSN
 is configured.
 
+Each captured event carries the exception message, type, level, and a normalized stack trace
+that includes a **source window** — the failing line plus up to five lines of surrounding
+context — so the dashboard highlights exactly where the error occurred. (The window is omitted
+for the SDK's own transport errors, whose call sites could embed request data — see
+[PII guarantee](#pii-guarantee).)
+
 > **Delivery is synchronous best-effort (PHP-specific).** PHP has no portable background
 > threads in a request context, so the reporter delivers each event **inline with a short
 > timeout (2s)**. Every failure — any exception, any non-202 — is swallowed. Reporting never
@@ -801,3 +810,66 @@ The reporter **never transmits** your `clientId`, `apiKey`, the `Authorization` 
 **outgoing request body** (which carries phone numbers and message content). Only the server's
 error response `body`, `status_code`, the HTTP `method`, and the request `path` may leave the
 process. This is enforced and covered by tests.
+
+### Framework integration
+
+For web apps, prefer wiring the reporter into your framework's exception pipeline instead of the
+global handler — you get the request `method`/`path`, the authenticated user, and a **source
+window** on the failing line automatically. Each bridge filters out client-error (4xx) HTTP
+exceptions (404s, validation, auth redirects) so the tracker isn't flooded with routing noise, and
+re-raises / re-renders the error exactly as before.
+
+All three read `CALLISTO_ERROR_DSN` (required to activate) and `CALLISTO_ENVIRONMENT` (optional) —
+**no `clientId`/`apiKey` needed**: error tracking is independent of the API client. The frameworks
+themselves are *optional* (declared under composer `suggest`); a bridge is inert unless its
+framework is installed.
+
+**Laravel** — zero config. The SDK ships `Callisto\Sdk\Framework\Laravel\CallistoServiceProvider`,
+auto-discovered via composer. Set `CALLISTO_ERROR_DSN` in `.env` and you're done. It registers a
+[`reportable`](https://laravel.com/docs/errors#reporting-exceptions) callback, so Laravel's own
+logging and error pages are untouched. (Override the DSN/environment via a published `config/callisto.php`
+with `dsn` / `environment` keys.)
+
+**Symfony** — register the listener for the `kernel.exception` event:
+
+```yaml
+# config/services.yaml
+services:
+    Callisto\Sdk\Framework\Symfony\CallistoExceptionListener:
+        tags:
+            - { name: kernel.event_listener, event: kernel.exception, method: onKernelException }
+```
+
+**BowPHP** — report from your configured error handler (no middleware). Bow renders uncaught
+exceptions through the class set as `error_handle` in `config/app.php`; add one line to its
+`handle()`:
+
+```php
+use Callisto\Sdk\Framework\Bowphp\CallistoErrorHandler;
+
+class ErrorHandle extends \Bow\Application\Exception\BaseErrorHandler
+{
+    public function handle($exception): mixed
+    {
+        CallistoErrorHandler::report($exception); // report to Callisto, then render as usual
+        // ... your existing rendering
+    }
+}
+```
+
+It reads the current request automatically. Optionally configure the integration once at boot
+(otherwise it builds from env): `CallistoErrorHandler::using(CallistoIntegration::fromEnv());`
+
+**Any framework** — the framework-neutral core is reusable directly:
+
+```php
+use Callisto\Sdk\Integration\CallistoIntegration;
+
+$callisto = CallistoIntegration::fromEnv();
+try {
+    $kernel->handle($request);
+} catch (\Throwable $e) {
+    $callisto->captureUnhandled($e, CallistoIntegration::request($method, $path), $user);
+    throw $e;
+}
+```

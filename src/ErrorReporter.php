@@ -32,6 +32,12 @@ final class ErrorReporter
 
     private const LEVELS = ['fatal', 'error', 'warning', 'info'];
 
+    /** Source lines captured on each side of a frame's error line. */
+    private const CONTEXT_LINES = 5;
+
+    /** Skip source capture for files larger than this (bytes). */
+    private const MAX_SOURCE_BYTES = 2_000_000;
+
     private readonly ?string $dsn;
     private readonly Sender $sender;
 
@@ -56,20 +62,26 @@ final class ErrorReporter
      * Capture an exception/throwable and deliver it (best-effort).
      *
      * @param array<string, mixed>|null $extra  merged into context
-     * @param array{method:string,path:string}|null $request  for transport errors
+     * @param array{method:string,path:string}|null $request  inbound request (method/path)
+     * @param bool $withSource  whether to attach the source window to frames.
+     *        Defaults true; the SDK's own Transport passes false because a
+     *        transport call site can embed the outgoing request body as literal
+     *        arguments (see buildExceptionPayload). Framework integrations leave
+     *        it true: their requests carry only method/path, never a body.
      */
     public function captureException(
         Throwable $e,
         string $level = 'error',
         ?array $extra = null,
         ?array $request = null,
+        bool $withSource = true,
     ): void {
         if ($this->dsn === null) {
             return;
         }
 
         try {
-            $payload = $this->buildExceptionPayload($e, $level, $extra, $request);
+            $payload = $this->buildExceptionPayload($e, $level, $extra, $request, $withSource);
             $this->dispatch($payload);
         } catch (Throwable) {
             // Never re-capture our own failures, never throw.
@@ -132,6 +144,7 @@ final class ErrorReporter
         string $level,
         ?array $extra,
         ?array $request,
+        bool $withSource,
     ): array {
         $context = $this->buildContext($extra);
 
@@ -157,7 +170,13 @@ final class ErrorReporter
             'context' => $context,
         ];
 
-        $stacktrace = $this->stacktrace($e);
+        // Source context is captured unless the caller opts out. The SDK's own
+        // Transport opts out ($withSource = false) because a transport call site
+        // can embed the outgoing request body as literal arguments, and reading
+        // it would violate the hard no-request-body guarantee. Framework-caught
+        // application exceptions keep it on — their requests carry only
+        // method/path — so the failing code is shown with the error line in focus.
+        $stacktrace = $this->stacktrace($e, $withSource);
         if ($stacktrace !== []) {
             $payload['stacktrace'] = $stacktrace;
         }
@@ -224,20 +243,72 @@ final class ErrorReporter
     }
 
     /**
-     * @return array<int, array{function:?string,file:?string,line:?int}>
+     * Build the frame list. Each frame carries function / file / line, and —
+     * when the source file is readable — a Sentry-style source window around the
+     * error line (`pre_context`, `context_line`, `post_context`, up to
+     * self::CONTEXT_LINES each side) so the dashboard can render the failing
+     * code with the error line in focus.
+     *
+     * @param bool $withSource Whether to attach the source window (off for
+     *                         transport errors — see buildExceptionPayload).
+     * @return array<int, array{function:?string,file:?string,line:?int,pre_context?:list<string>,context_line?:string,post_context?:list<string>}>
      */
-    private function stacktrace(Throwable $e): array
+    private function stacktrace(Throwable $e, bool $withSource): array
     {
         $frames = [];
         foreach ($e->getTrace() as $frame) {
-            $frames[] = [
+            $file = isset($frame['file']) ? (string) $frame['file'] : null;
+            $line = isset($frame['line']) ? (int) $frame['line'] : null;
+
+            $built = [
                 'function' => isset($frame['function']) ? (string) $frame['function'] : null,
-                'file' => isset($frame['file']) ? (string) $frame['file'] : null,
-                'line' => isset($frame['line']) ? (int) $frame['line'] : null,
+                'file' => $file,
+                'line' => $line,
             ];
+
+            if ($withSource && $file !== null && $line !== null) {
+                $built += $this->sourceContext($file, $line);
+            }
+
+            $frames[] = $built;
         }
 
         return $frames;
+    }
+
+    /**
+     * Read a window of source around $line: up to self::CONTEXT_LINES lines
+     * before (`pre_context`), the line itself (`context_line`), and up to
+     * self::CONTEXT_LINES after (`post_context`). Best-effort and fully
+     * defensive — any unreadable / oversized / out-of-range file yields an empty
+     * array, so a frame simply renders without a source window.
+     *
+     * @return array{pre_context?:list<string>,context_line?:string,post_context?:list<string>}
+     */
+    private function sourceContext(string $file, int $line): array
+    {
+        if ($line < 1 || !@is_file($file) || !@is_readable($file)) {
+            return [];
+        }
+
+        $size = @filesize($file);
+        if ($size === false || $size > self::MAX_SOURCE_BYTES) {
+            return [];
+        }
+
+        $lines = @file($file, FILE_IGNORE_NEW_LINES);
+        if ($lines === false || $line > count($lines)) {
+            return [];
+        }
+
+        $index = $line - 1; // 0-based offset of the error line
+        $start = max(0, $index - self::CONTEXT_LINES);
+
+        return [
+            'pre_context' => array_values(array_slice($lines, $start, $index - $start)),
+            'context_line' => (string) $lines[$index],
+            'post_context' => array_values(array_slice($lines, $index + 1, self::CONTEXT_LINES)),
+        ];
     }
 
     private function normalizeLevel(string $level): string

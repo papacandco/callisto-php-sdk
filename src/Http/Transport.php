@@ -63,6 +63,7 @@ final class Transport
                 'error',
                 null,
                 ['method' => $method, 'path' => $path],
+                withSource: false,
             );
             throw $error;
         }
@@ -86,6 +87,7 @@ final class Transport
                 'error',
                 null,
                 ['method' => $method, 'path' => $path],
+                withSource: false,
             );
             throw $error;
         }
