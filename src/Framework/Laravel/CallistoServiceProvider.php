@@ -12,7 +12,7 @@ use Throwable;
 
 /**
  * Laravel integration. Auto-discovered via composer (extra.laravel.providers),
- * so installing the SDK in a Laravel app is enough — set CALLISTO_ERROR_DSN and
+ * so installing the SDK in a Laravel app is enough — set CALLISTO_APP_ERROR_DSN and
  * captured exceptions flow to Callisto with request + user context and a source
  * window on the failing line.
  *
@@ -29,9 +29,9 @@ final class CallistoServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(CallistoIntegration::class, static function ($app): CallistoIntegration {
-            $config = is_array($app['config']['callisto'] ?? null) ? $app['config']['callisto'] : [];
+            $config = is_array($app['config']['services'] ?? null) ? $app['config']['services'] : [];
 
-            $dsn = $config['dsn'] ?? (getenv('CALLISTO_ERROR_DSN') ?: null);
+            $dsn = $config['callisto']['dsn'] ?? (getenv('CALLISTO_APP_ERROR_DSN') ?: null);
             $environment = $config['environment']
                 ?? (getenv('CALLISTO_ENVIRONMENT') ?: null)
                 ?? (method_exists($app, 'environment') ? $app->environment() : null);

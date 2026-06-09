@@ -39,7 +39,7 @@ final class Config
         $baseUrl = $baseUrl ?? (getenv('CALLISTO_BASE_URL') ?: null) ?? self::DEFAULT_BASE_URL;
         $baseUrl = rtrim($baseUrl, '/');
 
-        $errorDsn = $errorDsn ?? (getenv('CALLISTO_ERROR_DSN') ?: null);
+        $errorDsn = $errorDsn ?? (getenv('CALLISTO_APP_ERROR_DSN') ?: null);
         $environment = $environment ?? (getenv('CALLISTO_ENVIRONMENT') ?: null);
         $captureUnhandled = $captureUnhandled ?? self::envBool('CALLISTO_CAPTURE_UNHANDLED', false);
 

@@ -23,7 +23,7 @@ use Throwable;
  *     tags:
  *       - { name: kernel.event_listener, event: kernel.exception, method: onKernelException }
  *
- * With no constructor argument it configures itself from CALLISTO_ERROR_DSN /
+ * With no constructor argument it configures itself from CALLISTO_APP_ERROR_DSN /
  * CALLISTO_ENVIRONMENT; inject a {@see CallistoIntegration} to override.
  */
 final class CallistoExceptionListener

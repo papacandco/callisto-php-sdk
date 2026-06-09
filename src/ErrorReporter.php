@@ -26,7 +26,7 @@ use Throwable;
  */
 final class ErrorReporter
 {
-    public const NAME = 'callisto/sdk';
+    public const NAME = 'callisto-php/sdk';
     public const VERSION = '1.0.0';
     public const LANGUAGE = 'php';
 

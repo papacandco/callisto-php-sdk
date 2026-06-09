@@ -119,7 +119,7 @@ class ReporterTest extends BaseTestCase
         }
 
         $payload = $this->sender->lastPayload();
-        $this->assertSame('callisto/sdk', $payload['context']['sdk']['name']);
+        $this->assertSame('callisto-php/sdk', $payload['context']['sdk']['name']);
         $this->assertSame('php', $payload['context']['sdk']['language']);
         $this->assertArrayHasKey('version', $payload['context']['sdk']);
         $this->assertSame(404, $payload['context']['status_code']);

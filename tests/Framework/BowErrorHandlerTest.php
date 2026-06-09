@@ -74,7 +74,7 @@ class BowErrorHandlerTest extends TestCase
     public function testNeverThrowsEvenWithoutConfiguredIntegration(): void
     {
         // No DSN configured anywhere → no-op, and report() must still not throw.
-        putenv('CALLISTO_ERROR_DSN');
+        putenv('CALLISTO_APP_ERROR_DSN');
         CallistoErrorHandler::report(new RuntimeException('x'));
         $this->addToAssertionCount(1);
     }

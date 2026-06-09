@@ -135,35 +135,6 @@ final class Client
             return;
         }
         $this->unhandledInstalled = true;
-        $reporter = $this->reporter;
-
-        $previous = set_exception_handler(static function (Throwable $e) use ($reporter, &$previous): void {
-            $reporter->captureException($e, 'fatal');
-            if ($previous !== null) {
-                $previous($e);
-            } else {
-                // Preserve PHP's default behavior (re-raise).
-                throw $e;
-            }
-        });
-
-        register_shutdown_function(static function () use ($reporter): void {
-            $error = error_get_last();
-            if ($error === null) {
-                return;
-            }
-            $fatalTypes = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR;
-            if (($error['type'] & $fatalTypes) === 0) {
-                return;
-            }
-            $throwable = new \ErrorException(
-                $error['message'],
-                0,
-                $error['type'],
-                $error['file'],
-                $error['line'],
-            );
-            $reporter->captureException($throwable, 'fatal');
-        });
+        UnhandledHandler::install($this->reporter);
     }
 }

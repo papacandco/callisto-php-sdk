@@ -94,7 +94,7 @@ class CallistoIntegrationTest extends TestCase
 
     public function testFromEnvReadsDsnAndEnvironment(): void
     {
-        putenv('CALLISTO_ERROR_DSN=' . self::DSN);
+        putenv('CALLISTO_APP_ERROR_DSN=' . self::DSN);
         putenv('CALLISTO_ENVIRONMENT=staging');
         try {
             $sender = new RecordingSender();
@@ -106,7 +106,7 @@ class CallistoIntegrationTest extends TestCase
             $this->assertCount(1, $sender->payloads);
             $this->assertSame('staging', $sender->last()['context']['environment']);
         } finally {
-            putenv('CALLISTO_ERROR_DSN');
+            putenv('CALLISTO_APP_ERROR_DSN');
             putenv('CALLISTO_ENVIRONMENT');
         }
     }

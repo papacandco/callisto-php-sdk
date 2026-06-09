@@ -28,7 +28,7 @@ use Throwable;
  * HTTP exceptions via {@see CallistoIntegration::shouldReport}, and returns so
  * your handler renders the error page exactly as before.
  *
- * With no configured integration it builds one from CALLISTO_ERROR_DSN /
+ * With no configured integration it builds one from CALLISTO_APP_ERROR_DSN /
  * CALLISTO_ENVIRONMENT; call {@see using()} once at boot to supply your own.
  * Duck-typed against Bow\Http\Request (method()/path()), so the SDK needs no
  * dependency on bowphp/framework.

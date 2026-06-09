@@ -8,7 +8,9 @@
     "guzzlehttp/guzzle": "^7.5"
   },
   "require-dev": {
-    "phpunit/phpunit": "^10.0"
+    "phpunit/phpunit": "^10.0",
+    "laravel/framework": "^13.14",
+    "symfony/http-kernel": "^8.1"
   },
   "suggest": {
     "laravel/framework": "Auto-wires error reporting in Laravel via Callisto\\Sdk\\Framework\\Laravel\\CallistoServiceProvider (auto-discovered).",

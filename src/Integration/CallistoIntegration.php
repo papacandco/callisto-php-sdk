@@ -16,12 +16,13 @@ use Throwable;
  * (what's worth reporting, how to attach request/user) live in one tested place.
  *
  * Error reporting is decoupled from the API client: an app can enable it with
- * just a DSN (CALLISTO_ERROR_DSN), no client id / api key required.
+ * just a DSN (CALLISTO_APP_ERROR_DSN), no client id / api key required.
  */
 final class CallistoIntegration
 {
-    public function __construct(private readonly ErrorReporter $reporter)
-    {
+    public function __construct(
+        private readonly ErrorReporter $reporter
+    ) {
     }
 
     public static function fromReporter(ErrorReporter $reporter): self
@@ -30,13 +31,13 @@ final class CallistoIntegration
     }
 
     /**
-     * Build from the environment: CALLISTO_ERROR_DSN (required for reporting to
+     * Build from the environment: CALLISTO_APP_ERROR_DSN (required for reporting to
      * be active) and CALLISTO_ENVIRONMENT (optional tag). When the DSN is absent
      * the resulting integration is a cheap no-op.
      */
     public static function fromEnv(?Sender $sender = null): self
     {
-        $dsn = getenv('CALLISTO_ERROR_DSN') ?: null;
+        $dsn = getenv('CALLISTO_APP_ERROR_DSN') ?: null;
         $environment = getenv('CALLISTO_ENVIRONMENT') ?: null;
 
         return new self(new ErrorReporter($dsn, $environment, $sender));
