@@ -33,7 +33,7 @@ final class ErrorReporter
     private const LEVELS = ['fatal', 'error', 'warning', 'info'];
 
     /** Source lines captured on each side of a frame's error line. */
-    private const CONTEXT_LINES = 5;
+    private const CONTEXT_LINES = 10;
 
     /** Skip source capture for files larger than this (bytes). */
     private const MAX_SOURCE_BYTES = 2_000_000;
