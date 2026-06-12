@@ -26,7 +26,7 @@ class WhatsAppTest extends TestCase
     ];
 
     private const MESSAGE = [
-        'id' => 'msg_9', 'instance_id' => 'inst_1', 'client_id' => 'c1', 'api_client_id' => 'ac1',
+        'id' => 'msg_9', 'instance_id' => 'inst_1', 'client_id' => 'c1', 'client_api_id' => 'ac1',
         'recipient' => '+2250700000000', 'recipient_name' => 'Bob', 'message_type' => 'text',
         'content' => 'hi', 'media_url' => null, 'media_mimetype' => null, 'media_filename' => null,
         'extra_data' => [], 'direction' => 'outbound', 'status' => 'sent',

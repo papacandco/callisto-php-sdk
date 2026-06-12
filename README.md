@@ -627,7 +627,7 @@ See [Pagination](#pagination) above.
 | `id`                  | `string`                |
 | `instanceId`          | `?string`               |
 | `clientId`            | `?string`               |
-| `apiClientId`         | `?string`               |
+| `clientApiId`         | `?string`               |
 | `recipient`           | `?string`               |
 | `recipientName`       | `?string`               |
 | `messageType`         | `?string`               |
