@@ -285,4 +285,69 @@ class ReporterTest extends BaseTestCase
         $this->assertIsArray($payload['stacktrace']);
         $this->assertArrayHasKey('function', $payload['stacktrace'][0]);
     }
+
+    public function testRequestBlockEnrichedAndRedacted(): void
+    {
+        $this->reporter()->captureException(
+            new ValidationException('boom'),
+            'error',
+            null,
+            [
+                'method' => 'POST',
+                'path' => '/orders',
+                'url' => 'http://host/orders?token=abc&page=2',
+                'query' => ['token' => 'abc', 'page' => '2'],
+                'headers' => [
+                    'accept' => '*/*',
+                    'authorization' => 'Bearer secret-xyz',
+                    'x-custom' => ['a', 'b'],
+                ],
+                'ip' => '203.0.113.7',
+            ],
+        );
+
+        $req = $this->sender->lastPayload()['request'];
+        $this->assertSame('POST', $req['method']);
+        $this->assertSame('/orders', $req['path']);
+        // url keeps scheme+host+path, drops the query string.
+        $this->assertSame('http://host/orders', $req['url']);
+        // query: sensitive key redacted, normal key kept.
+        $this->assertSame('[Filtered]', $req['query_string']['token']);
+        $this->assertSame('2', $req['query_string']['page']);
+        // headers: Title-Cased keys, sensitive redacted, multi-value joined.
+        $this->assertSame('*/*', $req['headers']['Accept']);
+        $this->assertSame('[Filtered]', $req['headers']['Authorization']);
+        $this->assertSame('a, b', $req['headers']['X-Custom']);
+        $this->assertSame('203.0.113.7', $req['ip']);
+
+        // Hard guarantee: the raw secret never appears anywhere in the payload.
+        $encoded = json_encode($this->sender->lastPayload());
+        $this->assertStringNotContainsString('secret-xyz', (string) $encoded);
+    }
+
+    public function testIpResolvedFromProxyHeadersWhenNotExplicit(): void
+    {
+        $this->reporter()->captureException(
+            new ValidationException('x'),
+            'error',
+            null,
+            [
+                'method' => 'GET',
+                'path' => '/x',
+                'headers' => ['X-Forwarded-For' => '198.51.100.9, 10.0.0.1'],
+            ],
+        );
+        $this->assertSame('198.51.100.9', $this->sender->lastPayload()['request']['ip']);
+    }
+
+    public function testMethodPathOnlyRequestIsUnchanged(): void
+    {
+        $this->reporter()->captureException(
+            new ValidationException('x'),
+            'error',
+            null,
+            ['method' => 'GET', 'path' => '/x'],
+        );
+        $this->assertSame(['method' => 'GET', 'path' => '/x'], $this->sender->lastPayload()['request']);
+    }
 }

@@ -38,6 +38,22 @@ final class ErrorReporter
     /** Skip source capture for files larger than this (bytes). */
     private const MAX_SOURCE_BYTES = 2_000_000;
 
+    /** Replacement for any redacted header/query value. */
+    private const REDACTED = '[Filtered]';
+
+    /** Header/query keys whose value must never be transmitted. */
+    private const SENSITIVE_KEYS = [
+        'authorization', 'cookie', 'set-cookie', 'proxy-authorization',
+        'x-api-key', 'x-csrf-token', 'x-xsrf-token',
+    ];
+
+    /** Key-name patterns that also force redaction. */
+    private const SENSITIVE_KEY_PATTERN = '/authoriz|cookie|secret|token|password|passwd|api[-_]?key|csrf|session/i';
+
+    /** Caps to keep the request block bounded. */
+    private const MAX_MAP_ITEMS = 50;
+    private const MAX_VALUE_BYTES = 1024;
+
     private readonly ?string $dsn;
     private readonly Sender $sender;
 
@@ -62,7 +78,7 @@ final class ErrorReporter
      * Capture an exception/throwable and deliver it (best-effort).
      *
      * @param array<string, mixed>|null $extra  merged into context
-     * @param array{method:string,path:string}|null $request  inbound request (method/path)
+     * @param array{method:string,path:string,url?:string,query?:array,headers?:array,ip?:string}|null $request  inbound request
      * @param bool $withSource  whether to attach the source window to frames.
      *        Defaults true; the SDK's own Transport passes false because a
      *        transport call site can embed the outgoing request body as literal
@@ -136,7 +152,7 @@ final class ErrorReporter
 
     /**
      * @param array<string, mixed>|null $extra
-     * @param array{method:string,path:string}|null $request
+     * @param array{method:string,path:string,url?:string,query?:array,headers?:array,ip?:string}|null $request
      * @return array<string, mixed>
      */
     private function buildExceptionPayload(
@@ -182,10 +198,24 @@ final class ErrorReporter
         }
 
         if ($request !== null) {
-            $payload['request'] = [
+            $req = [
                 'method' => $request['method'],
                 'path' => $request['path'],
             ];
+            if (isset($request['url']) && is_string($request['url'])) {
+                $req['url'] = $this->stripQuery($request['url']);
+            }
+            if (isset($request['query']) && is_array($request['query']) && $request['query'] !== []) {
+                $req['query_string'] = $this->redactMap($request['query'], false);
+            }
+            if (isset($request['headers']) && is_array($request['headers']) && $request['headers'] !== []) {
+                $req['headers'] = $this->redactMap($request['headers'], true);
+            }
+            $ip = $this->resolveIp($request);
+            if ($ip !== null) {
+                $req['ip'] = $ip;
+            }
+            $payload['request'] = $req;
         }
 
         if ($this->user !== null) {
@@ -336,5 +366,97 @@ final class ErrorReporter
         }
 
         return filter_var($dsn, FILTER_VALIDATE_URL) !== false;
+    }
+
+    /**
+     * Redact a header/query map: sensitive keys' values become [Filtered];
+     * other values are flattened (arrays joined) and length-capped. The map size
+     * is capped. When $titleCaseKeys, header names are normalized to Title-Case.
+     *
+     * @param array<array-key, mixed> $map
+     * @return array<string, string>
+     */
+    private function redactMap(array $map, bool $titleCaseKeys): array
+    {
+        $out = [];
+        $count = 0;
+        foreach ($map as $key => $value) {
+            if ($count >= self::MAX_MAP_ITEMS) {
+                break;
+            }
+            $count++;
+            $rawKey = (string) $key;
+            $name = $titleCaseKeys ? $this->titleCaseHeader($rawKey) : $rawKey;
+            if ($this->isSensitiveKey($rawKey)) {
+                $out[$name] = self::REDACTED;
+                continue;
+            }
+            $flat = is_array($value)
+                ? implode(', ', array_map(static fn ($v): string => (string) $v, $value))
+                : (string) $value;
+            if (strlen($flat) > self::MAX_VALUE_BYTES) {
+                $flat = substr($flat, 0, self::MAX_VALUE_BYTES);
+            }
+            $out[$name] = $flat;
+        }
+
+        return $out;
+    }
+
+    private function isSensitiveKey(string $key): bool
+    {
+        $lower = strtolower($key);
+        if (in_array($lower, self::SENSITIVE_KEYS, true)) {
+            return true;
+        }
+
+        return preg_match(self::SENSITIVE_KEY_PATTERN, $lower) === 1;
+    }
+
+    private function titleCaseHeader(string $name): string
+    {
+        $parts = explode('-', strtolower($name));
+
+        return implode('-', array_map(static fn (string $p): string => ucfirst($p), $parts));
+    }
+
+    private function stripQuery(string $url): string
+    {
+        $pos = strpos($url, '?');
+
+        return $pos === false ? $url : substr($url, 0, $pos);
+    }
+
+    /**
+     * Resolve the client IP: an explicit `ip` wins; otherwise derive from proxy
+     * headers in order Cf-Connecting-Ip → X-Forwarded-For (first) → X-Real-Ip.
+     *
+     * @param array<string, mixed> $request
+     */
+    private function resolveIp(array $request): ?string
+    {
+        if (isset($request['ip']) && is_string($request['ip']) && $request['ip'] !== '') {
+            return $request['ip'];
+        }
+        $headers = $request['headers'] ?? null;
+        if (!is_array($headers)) {
+            return null;
+        }
+        $lower = [];
+        foreach ($headers as $k => $v) {
+            $lower[strtolower((string) $k)] = is_array($v) ? (string) ($v[0] ?? '') : (string) $v;
+        }
+        foreach (['cf-connecting-ip', 'x-forwarded-for', 'x-real-ip'] as $h) {
+            if (!empty($lower[$h])) {
+                $val = $lower[$h];
+                if ($h === 'x-forwarded-for') {
+                    $val = trim(explode(',', $val)[0]);
+                }
+
+                return $val;
+            }
+        }
+
+        return null;
     }
 }
