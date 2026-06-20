@@ -198,6 +198,7 @@ final class ErrorReporter
         }
 
         if ($request !== null) {
+            // The request body is deliberately never captured (PII guarantee).
             $req = [
                 'method' => $request['method'],
                 'path' => $request['path'],
@@ -396,6 +397,10 @@ final class ErrorReporter
                 : (string) $value;
             if (strlen($flat) > self::MAX_VALUE_BYTES) {
                 $flat = substr($flat, 0, self::MAX_VALUE_BYTES);
+                // Drop a possibly-split trailing multibyte sequence so the value
+                // stays valid UTF-8 (an invalid byte would make json_encode fail
+                // and silently lose the whole event).
+                $flat = (string) mb_convert_encoding($flat, 'UTF-8', 'UTF-8');
             }
             $out[$name] = $flat;
         }

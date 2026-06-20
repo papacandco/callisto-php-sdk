@@ -350,4 +350,20 @@ class ReporterTest extends BaseTestCase
         );
         $this->assertSame(['method' => 'GET', 'path' => '/x'], $this->sender->lastPayload()['request']);
     }
+
+    public function testOversizedMultibyteHeaderStaysJsonEncodable(): void
+    {
+        $value = str_repeat('é', 2000); // 4000 bytes, multibyte
+        $this->reporter()->captureException(
+            new ValidationException('x'),
+            'error',
+            null,
+            ['method' => 'GET', 'path' => '/x', 'headers' => ['X-Big' => $value]],
+        );
+        $encoded = json_encode($this->sender->lastPayload());
+        $this->assertIsString($encoded);
+        $this->assertNotFalse($encoded);
+        // truncated to the byte cap, valid UTF-8
+        $this->assertTrue(mb_check_encoding($this->sender->lastPayload()['request']['headers']['X-Big'], 'UTF-8'));
+    }
 }
