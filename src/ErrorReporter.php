@@ -164,6 +164,11 @@ final class ErrorReporter
     ): array {
         $context = $this->buildContext($extra);
 
+        $requestId = $this->requestIdFrom($request);
+        if ($requestId !== null) {
+            $context['trace']['request_id'] = $requestId;
+        }
+
         if ($e instanceof CallistoException) {
             $status = $e->getStatusCode();
             if ($status !== 0) {
@@ -247,6 +252,24 @@ final class ErrorReporter
                 $context[$key] = $value;
             }
         }
+
+        $context['runtime'] = [
+            'name' => 'php',
+            'version' => PHP_VERSION,
+            'sapi' => php_sapi_name(),
+            'os' => php_uname('s'),
+            'os_version' => php_uname('r'),
+        ];
+        $host = gethostname();
+        if ($host !== false) {
+            $context['server'] = ['name' => $host];
+        }
+        $stats = ['memory_peak_bytes' => memory_get_peak_usage(true)];
+        if (isset($_SERVER['REQUEST_TIME_FLOAT'])) {
+            $stats['duration_ms'] = round((microtime(true) - (float) $_SERVER['REQUEST_TIME_FLOAT']) * 1000, 2);
+        }
+        $context['runtime_stats'] = $stats;
+        $context['trace'] = ['trace_id' => bin2hex(random_bytes(16))];
 
         return $context;
     }
@@ -459,6 +482,28 @@ final class ErrorReporter
                 }
 
                 return $val;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The inbound X-Request-Id (case-insensitive) for log correlation, or null.
+     *
+     * @param array<string, mixed>|null $request
+     */
+    private function requestIdFrom(?array $request): ?string
+    {
+        $headers = $request['headers'] ?? null;
+        if (!is_array($headers)) {
+            return null;
+        }
+        foreach ($headers as $k => $v) {
+            if (strtolower((string) $k) === 'x-request-id') {
+                $val = is_array($v) ? (string) ($v[0] ?? '') : (string) $v;
+
+                return $val === '' ? null : $val;
             }
         }
 

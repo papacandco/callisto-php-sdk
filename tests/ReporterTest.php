@@ -366,4 +366,29 @@ class ReporterTest extends BaseTestCase
         // truncated to the byte cap, valid UTF-8
         $this->assertTrue(mb_check_encoding($this->sender->lastPayload()['request']['headers']['X-Big'], 'UTF-8'));
     }
+
+    public function testContextCarriesRuntimeServerTraceAndStats(): void
+    {
+        $this->reporter()->captureMessage('hi', 'info');
+        $ctx = $this->sender->lastPayload()['context'];
+
+        $this->assertSame('php', $ctx['runtime']['name']);
+        $this->assertSame(PHP_VERSION, $ctx['runtime']['version']);
+        $this->assertArrayHasKey('sapi', $ctx['runtime']);
+        $this->assertArrayHasKey('os', $ctx['runtime']);
+        $this->assertArrayHasKey('name', $ctx['server']);
+        $this->assertArrayHasKey('memory_peak_bytes', $ctx['runtime_stats']);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{32}$/', $ctx['trace']['trace_id']);
+    }
+
+    public function testRequestIdLiftedFromHeaderIntoContextTrace(): void
+    {
+        $this->reporter()->captureException(
+            new ValidationException('x'),
+            'error',
+            null,
+            ['method' => 'GET', 'path' => '/x', 'headers' => ['X-Request-Id' => 'req-123']],
+        );
+        $this->assertSame('req-123', $this->sender->lastPayload()['context']['trace']['request_id']);
+    }
 }
