@@ -45,10 +45,11 @@ final class ErrorReporter
     private const SENSITIVE_KEYS = [
         'authorization', 'cookie', 'set-cookie', 'proxy-authorization',
         'x-api-key', 'x-csrf-token', 'x-xsrf-token',
+        'php-auth-pw', 'php-auth-user',
     ];
 
     /** Key-name patterns that also force redaction. */
-    private const SENSITIVE_KEY_PATTERN = '/authoriz|cookie|secret|token|password|passwd|api[-_]?key|csrf|session/i';
+    private const SENSITIVE_KEY_PATTERN = '/authoriz|authentic|auth[-_]?(pw|user|pass)|cookie|secret|token|password|passwd|api[-_]?key|csrf|session/i';
 
     /** Caps to keep the request block bounded. */
     private const MAX_MAP_ITEMS = 50;

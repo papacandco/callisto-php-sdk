@@ -351,9 +351,34 @@ class ReporterTest extends BaseTestCase
         $this->assertSame(['method' => 'GET', 'path' => '/x'], $this->sender->lastPayload()['request']);
     }
 
+    public function testBasicAuthAndAuthenticationHeadersAreRedacted(): void
+    {
+        $this->reporter()->captureException(
+            new ValidationException('x'),
+            'error',
+            null,
+            [
+                'method' => 'GET',
+                'path' => '/x',
+                'headers' => [
+                    'Php-Auth-User' => 'admin',
+                    'Php-Auth-Pw' => 'super-secret-pw',
+                    'Authentication' => 'Token leak-me',
+                ],
+            ],
+        );
+        $h = $this->sender->lastPayload()['request']['headers'];
+        $this->assertSame('[Filtered]', $h['Php-Auth-User']);
+        $this->assertSame('[Filtered]', $h['Php-Auth-Pw']);
+        $this->assertSame('[Filtered]', $h['Authentication']);
+        $encoded = (string) json_encode($this->sender->lastPayload());
+        $this->assertStringNotContainsString('super-secret-pw', $encoded);
+        $this->assertStringNotContainsString('leak-me', $encoded);
+    }
+
     public function testOversizedMultibyteHeaderStaysJsonEncodable(): void
     {
-        $value = str_repeat('é', 2000); // 4000 bytes, multibyte
+        $value = str_repeat('€', 1000); // 3000 bytes, 3-byte char → boundary split
         $this->reporter()->captureException(
             new ValidationException('x'),
             'error',
