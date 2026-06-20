@@ -113,20 +113,43 @@ final class CallistoIntegration
     }
 
     /**
-     * Shape an inbound request into the reporter's {method, path} contract, or
-     * null when either part is missing.
+     * Shape an inbound request into the reporter's contract, or null when method
+     * or path is missing. Optional url/query/headers/ip are packaged RAW —
+     * redaction is the reporter's responsibility.
      *
-     * @return array{method:string,path:string}|null
+     * @param array<string, mixed>|null $query
+     * @param array<string, mixed>|null $headers
+     * @return array{method:string,path:string,url?:string,query?:array<string,mixed>,headers?:array<string,mixed>,ip?:string}|null
      */
-    public static function request(?string $method, ?string $path): ?array
-    {
+    public static function request(
+        ?string $method,
+        ?string $path,
+        ?string $url = null,
+        ?array $query = null,
+        ?array $headers = null,
+        ?string $ip = null,
+    ): ?array {
         $method = $method !== null ? trim($method) : '';
         $path = $path !== null ? trim($path) : '';
         if ($method === '' || $path === '') {
             return null;
         }
 
-        return ['method' => strtoupper($method), 'path' => $path];
+        $req = ['method' => strtoupper($method), 'path' => $path];
+        if ($url !== null && $url !== '') {
+            $req['url'] = $url;
+        }
+        if ($query !== null && $query !== []) {
+            $req['query'] = $query;
+        }
+        if ($headers !== null && $headers !== []) {
+            $req['headers'] = $headers;
+        }
+        if ($ip !== null && $ip !== '') {
+            $req['ip'] = $ip;
+        }
+
+        return $req;
     }
 
     /**

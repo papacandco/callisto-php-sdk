@@ -156,4 +156,27 @@ class CallistoIntegrationTest extends TestCase
         $this->assertTrue(CallistoIntegration::shouldReport(CallistoException::fromStatus(500, 'err', null)));
         $this->assertTrue(CallistoIntegration::shouldReport(new RuntimeException('plain')));
     }
+
+    public function testRequestPackagesOptionalFieldsRaw(): void
+    {
+        $this->assertSame(
+            [
+                'method' => 'POST',
+                'path' => '/p',
+                'url' => 'http://h/p?x=1',
+                'query' => ['x' => '1'],
+                'headers' => ['Authorization' => 'Bearer t'],
+                'ip' => '1.2.3.4',
+            ],
+            CallistoIntegration::request('post', '/p', 'http://h/p?x=1', ['x' => '1'], ['Authorization' => 'Bearer t'], '1.2.3.4'),
+        );
+    }
+
+    public function testRequestOmitsEmptyOptionalFields(): void
+    {
+        $this->assertSame(
+            ['method' => 'GET', 'path' => '/p'],
+            CallistoIntegration::request('GET', '/p', null, [], [], null),
+        );
+    }
 }
