@@ -63,7 +63,7 @@ final class CallistoErrorHandler
      * Shape a Bow request (method()/path()) into {method, path}. Static + public
      * so it is unit-testable with a stand-in request.
      *
-     * @return array{method:string,path:string}|null
+     * @return array<string,mixed>|null
      */
     public static function requestFrom(?object $request): ?array
     {

@@ -127,4 +127,20 @@ class BowErrorHandlerTest extends TestCase
         $this->assertSame(['Authorization' => 'Bearer secret', 'Accept' => '*/*'], $req['headers']);
         $this->assertSame('203.0.113.7', $req['ip']);
     }
+
+    public function testRichHeadersAreFilteredEndToEnd(): void
+    {
+        $sender = new RecordingSender();
+        $integration = $this->integration($sender);
+        $integration->captureUnhandled(
+            new RuntimeException('bow-boom'),
+            CallistoErrorHandler::requestFrom($this->richRequest()),
+        );
+
+        $req = $sender->last()['request'];
+        $this->assertSame('[Filtered]', $req['headers']['Authorization']);
+        $this->assertSame('*/*', $req['headers']['Accept']);
+        // raw secret must not appear anywhere
+        $this->assertStringNotContainsString('Bearer secret', (string) json_encode($sender->last()));
+    }
 }
