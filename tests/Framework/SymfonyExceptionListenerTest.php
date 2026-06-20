@@ -91,4 +91,94 @@ class SymfonyExceptionListenerTest extends TestCase
 
         $this->assertSame([], $sender->payloads);
     }
+
+    /** A richer stand-in ExceptionEvent exposing url/query/headers/ip. */
+    private function richEvent(Throwable $e, string $method, string $path): object
+    {
+        $queryBag = new class {
+            /** @return array<string,mixed> */
+            public function all(): array
+            {
+                return ['token' => 'abc', 'page' => '2'];
+            }
+        };
+
+        $headersBag = new class {
+            /** @return array<string,mixed> */
+            public function all(): array
+            {
+                return ['Authorization' => 'Bearer secret', 'Accept' => '*/*'];
+            }
+        };
+
+        $request = new class ($method, $path, $queryBag, $headersBag) {
+            public object $query;
+            public object $headers;
+
+            public function __construct(
+                private string $method,
+                private string $path,
+                object $queryBag,
+                object $headersBag,
+            ) {
+                $this->query = $queryBag;
+                $this->headers = $headersBag;
+            }
+
+            public function getMethod(): string
+            {
+                return $this->method;
+            }
+
+            public function getPathInfo(): string
+            {
+                return $this->path;
+            }
+
+            public function getUri(): string
+            {
+                return 'http://host' . $this->path . '?token=abc';
+            }
+
+            public function getClientIp(): string
+            {
+                return '203.0.113.7';
+            }
+        };
+
+        return new class ($e, $request) {
+            public function __construct(private Throwable $throwable, private object $request)
+            {
+            }
+
+            public function getThrowable(): Throwable
+            {
+                return $this->throwable;
+            }
+
+            public function getRequest(): object
+            {
+                return $this->request;
+            }
+        };
+    }
+
+    public function testRichEventForwardsUrlQueryHeadersIp(): void
+    {
+        $sender = new RecordingSender();
+        $this->listener($sender)->onKernelException(
+            $this->richEvent(new RuntimeException('symfony-rich'), 'get', '/checkout')
+        );
+
+        $this->assertCount(1, $sender->payloads);
+        $req = $sender->last()['request'];
+        // URL has query string stripped by the reporter
+        $this->assertSame('http://host/checkout', $req['url']);
+        // query is stored under query_string after redact
+        $this->assertArrayHasKey('query_string', $req);
+        // Authorization header is redacted by the reporter
+        $this->assertSame('[Filtered]', $req['headers']['Authorization']);
+        // IP is passed through
+        $this->assertSame('203.0.113.7', $req['ip']);
+    }
 }

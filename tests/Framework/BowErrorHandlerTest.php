@@ -78,4 +78,53 @@ class BowErrorHandlerTest extends TestCase
         CallistoErrorHandler::report(new RuntimeException('x'));
         $this->addToAssertionCount(1);
     }
+
+    /** A richer stand-in for Bow\Http\Request (duck-typed). */
+    private function richRequest(): object
+    {
+        return new class {
+            public function method(): string
+            {
+                return 'post';
+            }
+
+            public function path(): string
+            {
+                return '/orders';
+            }
+
+            public function url(): string
+            {
+                return 'http://host/orders?token=abc';
+            }
+
+            /** @return array<string,mixed> */
+            public function query(): array
+            {
+                return ['token' => 'abc', 'page' => '2'];
+            }
+
+            /** @return array<string,mixed> */
+            public function getHeaders(): array
+            {
+                return ['Authorization' => 'Bearer secret', 'Accept' => '*/*'];
+            }
+
+            public function ip(): string
+            {
+                return '203.0.113.7';
+            }
+        };
+    }
+
+    public function testRequestFromForwardsRichFieldsRaw(): void
+    {
+        $req = CallistoErrorHandler::requestFrom($this->richRequest());
+        $this->assertSame('POST', $req['method']);
+        $this->assertSame('/orders', $req['path']);
+        $this->assertSame('http://host/orders?token=abc', $req['url']);   // raw; reporter strips/redacts
+        $this->assertSame(['token' => 'abc', 'page' => '2'], $req['query']);
+        $this->assertSame(['Authorization' => 'Bearer secret', 'Accept' => '*/*'], $req['headers']);
+        $this->assertSame('203.0.113.7', $req['ip']);
+    }
 }

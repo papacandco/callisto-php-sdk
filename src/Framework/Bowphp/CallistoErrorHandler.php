@@ -73,10 +73,18 @@ final class CallistoErrorHandler
 
         $method = method_exists($request, 'method') ? $request->method() : null;
         $path = method_exists($request, 'path') ? $request->path() : null;
+        $url = method_exists($request, 'url') ? $request->url() : null;
+        $query = method_exists($request, 'query') ? $request->query() : null;
+        $headers = method_exists($request, 'getHeaders') ? $request->getHeaders() : null;
+        $ip = method_exists($request, 'ip') ? $request->ip() : null;
 
         return CallistoIntegration::request(
             is_string($method) ? $method : null,
             is_string($path) ? $path : null,
+            is_string($url) ? $url : null,
+            is_array($query) ? $query : null,
+            is_array($headers) ? $headers : null,
+            is_string($ip) ? $ip : null,
         );
     }
 

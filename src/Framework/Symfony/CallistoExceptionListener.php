@@ -66,6 +66,29 @@ final class CallistoExceptionListener
         $method = method_exists($request, 'getMethod') ? (string) $request->getMethod() : null;
         $path = method_exists($request, 'getPathInfo') ? (string) $request->getPathInfo() : null;
 
-        return CallistoIntegration::request($method, $path);
+        $url = method_exists($request, 'getUri') ? (string) $request->getUri() : null;
+
+        $query = null;
+        if (isset($request->query) && is_object($request->query) && method_exists($request->query, 'all')) {
+            $all = $request->query->all();
+            $query = is_array($all) ? $all : null;
+        }
+
+        $headers = null;
+        if (isset($request->headers) && is_object($request->headers) && method_exists($request->headers, 'all')) {
+            $all = $request->headers->all();
+            $headers = is_array($all) ? $all : null;
+        }
+
+        $ip = method_exists($request, 'getClientIp') ? $request->getClientIp() : null;
+
+        return CallistoIntegration::request(
+            $method,
+            $path,
+            $url,
+            $query,
+            $headers,
+            is_string($ip) ? $ip : null,
+        );
     }
 }

@@ -78,7 +78,21 @@ final class CallistoServiceProvider extends ServiceProvider
         $method = method_exists($request, 'getMethod') ? (string) $request->getMethod() : null;
         $path = method_exists($request, 'path') ? '/' . ltrim((string) $request->path(), '/') : null;
 
-        return CallistoIntegration::request($method, $path);
+        $url = method_exists($request, 'fullUrl') ? (string) $request->fullUrl() : null;
+        $query = method_exists($request, 'query') ? $request->query() : null;
+        $headers = (isset($request->headers) && is_object($request->headers) && method_exists($request->headers, 'all'))
+            ? $request->headers->all()
+            : null;
+        $ip = method_exists($request, 'ip') ? $request->ip() : null;
+
+        return CallistoIntegration::request(
+            $method,
+            $path,
+            $url,
+            is_array($query) ? $query : null,
+            is_array($headers) ? $headers : null,
+            is_string($ip) ? $ip : null,
+        );
     }
 
     /**
