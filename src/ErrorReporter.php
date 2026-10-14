@@ -276,59 +276,150 @@ final class ErrorReporter
     }
 
     /**
+     * Where the error comes from in the application's own code: the first
+     * in-app frame, as "function in path/relative/to/project.php". No line
+     * number: the culprit is part of the issue fingerprint, and a line moves
+     * with every edit above it (the frame keeps the line). The request route
+     * is only the fallback, when no frame is in the application at all.
+     *
      * @param array{method:string,path:string}|null $request
      */
     private function culprit(Throwable $e, ?array $request): string
     {
+        foreach ($this->frames($e) as $frame) {
+            if ($frame['in_app'] && $frame['file'] !== null) {
+                return ($frame['function'] ?? '{main}') . ' in ' . $this->relativePath($frame['file']);
+            }
+        }
+
         if ($request !== null) {
             return $request['method'] . ' ' . $request['path'];
         }
 
-        $frame = $e->getTrace()[0] ?? null;
-        if (is_array($frame) && isset($frame['function'])) {
-            $where = '';
-            if (isset($e->getTrace()[0]['file'], $e->getTrace()[0]['line'])) {
-                $where = ' (' . $frame['file'] . ':' . $frame['line'] . ')';
-            }
-
-            return (string) $frame['function'] . $where;
-        }
-
-        return $e->getFile() . ':' . $e->getLine();
+        return $this->relativePath($e->getFile()) . ':' . $e->getLine();
     }
 
     /**
-     * Build the frame list. Each frame carries function / file / line, and —
-     * when the source file is readable — a Sentry-style source window around the
-     * error line (`pre_context`, `context_line`, `post_context`, up to
-     * self::CONTEXT_LINES each side) so the dashboard can render the failing
-     * code with the error line in focus.
+     * Build the frame list, innermost first: frame 0 is the line that raised
+     * the error, which the dashboard opens and highlights. Each frame carries
+     * function / file / line / in_app, and — when the source file is readable —
+     * a Sentry-style source window around its line (`pre_context`,
+     * `context_line`, `post_context`, up to self::CONTEXT_LINES each side).
      *
      * @param bool $withSource Whether to attach the source window (off for
      *                         transport errors — see buildExceptionPayload).
-     * @return array<int, array{function:?string,file:?string,line:?int,pre_context?:list<string>,context_line?:string,post_context?:list<string>}>
+     * @return array<int, array{function:?string,file:?string,line:?int,in_app:bool,pre_context?:list<string>,context_line?:string,post_context?:list<string>}>
      */
     private function stacktrace(Throwable $e, bool $withSource): array
     {
         $frames = [];
-        foreach ($e->getTrace() as $frame) {
-            $file = isset($frame['file']) ? (string) $frame['file'] : null;
-            $line = isset($frame['line']) ? (int) $frame['line'] : null;
-
-            $built = [
-                'function' => isset($frame['function']) ? (string) $frame['function'] : null,
-                'file' => $file,
-                'line' => $line,
-            ];
-
-            if ($withSource && $file !== null && $line !== null) {
-                $built += $this->sourceContext($file, $line);
+        foreach ($this->frames($e) as $frame) {
+            if ($withSource && $frame['file'] !== null && $frame['line'] !== null) {
+                $frame += $this->sourceContext($frame['file'], $frame['line']);
             }
-
-            $frames[] = $built;
+            $frames[] = $frame;
         }
 
         return $frames;
+    }
+
+    /**
+     * Re-pair PHP's trace into "this function, at this line inside it".
+     *
+     * getTrace() does not contain the line that raised the error: entry k names
+     * a function together with the line that CALLED it. Read as is, every
+     * function sat next to its caller's line and the throw site
+     * ($e->getFile():getLine()) was dropped, so the failing line of the
+     * developer's code never appeared. Here the throw site is frame 0 and each
+     * function is paired with the location inside it (the previous entry's
+     * call site); the outermost location is the top-level script, {main}.
+     *
+     * An ErrorException raised by an error handler (a warning or notice turned
+     * into an exception) has the handler as entry 0, called at the faulting
+     * line: that entry is dropped, the faulting line is already frame 0.
+     *
+     * @return list<array{function:?string,file:?string,line:?int,in_app:bool}>
+     */
+    private function frames(Throwable $e): array
+    {
+        $trace = $e->getTrace();
+        if (
+            $e instanceof \ErrorException
+            && isset($trace[0]['file'], $trace[0]['line'])
+            && $trace[0]['file'] === $e->getFile()
+            && (int) $trace[0]['line'] === $e->getLine()
+        ) {
+            array_shift($trace);
+        }
+
+        $frames = [];
+        $file = $e->getFile();
+        $line = $e->getLine();
+        foreach ($trace as $call) {
+            $frames[] = $this->frame($this->functionName($call), $file, $line);
+            $file = isset($call['file']) ? (string) $call['file'] : null;
+            $line = isset($call['line']) ? (int) $call['line'] : null;
+        }
+        if ($file !== null) {
+            $frames[] = $this->frame('{main}', $file, $line);
+        }
+
+        return $frames;
+    }
+
+    /**
+     * @return array{function:?string,file:?string,line:?int,in_app:bool}
+     */
+    private function frame(?string $function, ?string $file, ?int $line): array
+    {
+        return [
+            'function' => $function,
+            'file' => $file,
+            'line' => $line,
+            'in_app' => $file !== null && $this->isInApp($file),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $call
+     */
+    private function functionName(array $call): ?string
+    {
+        if (!isset($call['function'])) {
+            return null;
+        }
+        $function = (string) $call['function'];
+        if (isset($call['class'])) {
+            $function = $call['class'] . ($call['type'] ?? '::') . $function;
+        }
+
+        return $function;
+    }
+
+    /**
+     * Application code, as opposed to dependencies (anything under vendor/)
+     * and this SDK itself, whose frames only show how the error travelled.
+     */
+    private function isInApp(string $file): bool
+    {
+        $file = str_replace('\\', '/', $file);
+
+        return !str_contains($file, '/vendor/')
+            && !str_starts_with($file, str_replace('\\', '/', __DIR__) . '/');
+    }
+
+    /**
+     * The path relative to the project root (the directory holding vendor/),
+     * so a culprit stays the same whatever directory the project is deployed in.
+     */
+    private function relativePath(string $file): string
+    {
+        $file = str_replace('\\', '/', $file);
+        $sdk = str_replace('\\', '/', __DIR__);
+        $at = strpos($sdk, '/vendor/');
+        $root = $at !== false ? substr($sdk, 0, $at) : dirname($sdk);
+
+        return str_starts_with($file, $root . '/') ? substr($file, strlen($root) + 1) : $file;
     }
 
     /**

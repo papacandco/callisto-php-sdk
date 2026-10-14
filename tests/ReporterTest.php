@@ -125,7 +125,105 @@ class ReporterTest extends BaseTestCase
         $this->assertSame(404, $payload['context']['status_code']);
         $this->assertSame('GET', $payload['request']['method']);
         $this->assertSame('/sms/x', $payload['request']['path']);
-        $this->assertSame('GET ' . $payload['request']['path'], $payload['culprit']);
+        // The culprit is the developer's call, not the SDK internals nor the route.
+        $this->assertSame(
+            self::class . '->testTransportErrorIncludesSdkStatusAndRequest in tests/ReporterTest.php',
+            $payload['culprit']
+        );
+    }
+
+    // The line that raised the error is frame 0, inside the function that raised it.
+    public function testThrowSiteIsTheFirstFrame(): void
+    {
+        $line = 0;
+        try {
+            $this->failingCall($line);
+        } catch (RuntimeException $e) {
+            $this->reporter()->captureException($e);
+        }
+
+        $frames = $this->sender->lastPayload()['stacktrace'];
+        $this->assertSame(__FILE__, $frames[0]['file']);
+        $this->assertSame($line, $frames[0]['line']);
+        $this->assertSame(self::class . '->failingCall', $frames[0]['function']);
+        $this->assertTrue($frames[0]['in_app']);
+        $this->assertStringContainsString("throw new RuntimeException('charge failed')", $frames[0]['context_line']);
+        // Frame 1 is the caller, at the line that called failingCall().
+        $this->assertSame(self::class . '->testThrowSiteIsTheFirstFrame', $frames[1]['function']);
+        $this->assertStringContainsString('$this->failingCall($line)', $frames[1]['context_line']);
+        $this->assertSame(
+            self::class . '->failingCall in tests/ReporterTest.php',
+            $this->sender->lastPayload()['culprit']
+        );
+    }
+
+    // A warning turned into an ErrorException by an error handler points at
+    // the faulting line, not at the handler.
+    public function testErrorHandlerFrameIsDropped(): void
+    {
+        set_error_handler(static function (int $no, string $msg, string $file, int $line): bool {
+            throw new \ErrorException($msg, 0, $no, $file, $line);
+        });
+        $line = 0;
+        try {
+            $this->readMissingKey($line);
+        } catch (\ErrorException $e) {
+            $this->reporter()->captureException($e);
+        } finally {
+            restore_error_handler();
+        }
+
+        $frames = $this->sender->lastPayload()['stacktrace'];
+        $this->assertSame($line, $frames[0]['line']);
+        $this->assertSame(self::class . '->readMissingKey', $frames[0]['function']);
+        $this->assertStringContainsString("\$order['email']", $frames[0]['context_line']);
+    }
+
+    // Dependencies and the SDK itself are not the application's code.
+    public function testVendorAndSdkFramesAreNotInApp(): void
+    {
+        $client = $this->clientWith([[404, ['message' => 'Message not found']]], $this->sender);
+        try {
+            $client->sms()->getStatus('x');
+        } catch (NotFoundException $e) {
+            // expected
+        }
+
+        foreach ($this->sender->lastPayload()['stacktrace'] as $frame) {
+            $file = (string) $frame['file'];
+            if (str_contains($file, '/vendor/') || str_contains($file, '/src/')) {
+                $this->assertFalse($frame['in_app'], $file);
+            }
+        }
+    }
+
+    /**
+     * The payload without the source windows (pre_context / context_line /
+     * post_context), which quote the test file itself.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public static function withoutSource(array $payload): array
+    {
+        foreach ($payload['stacktrace'] ?? [] as $i => $frame) {
+            unset($payload['stacktrace'][$i]['pre_context'], $payload['stacktrace'][$i]['context_line'], $payload['stacktrace'][$i]['post_context']);
+        }
+
+        return $payload;
+    }
+
+    private function failingCall(int &$line): void
+    {
+        $line = __LINE__ + 1;
+        throw new RuntimeException('charge failed');
+    }
+
+    private function readMissingKey(int &$line): string
+    {
+        $order = [];
+        $line = __LINE__ + 1;
+        return $order['email'];
     }
 
     // 3. No credential or request-body leak.
@@ -320,8 +418,10 @@ class ReporterTest extends BaseTestCase
         $this->assertSame('a, b', $req['headers']['X-Custom']);
         $this->assertSame('203.0.113.7', $req['ip']);
 
-        // Hard guarantee: the raw secret never appears anywhere in the payload.
-        $encoded = json_encode($this->sender->lastPayload());
+        // Hard guarantee: the raw secret never appears anywhere in the captured
+        // data. The source windows are left out: they show this test's own code,
+        // where the secret is a literal next to the line that raised the error.
+        $encoded = json_encode(self::withoutSource($this->sender->lastPayload()));
         $this->assertStringNotContainsString('secret-xyz', (string) $encoded);
     }
 
@@ -371,7 +471,7 @@ class ReporterTest extends BaseTestCase
         $this->assertSame('[Filtered]', $h['Php-Auth-User']);
         $this->assertSame('[Filtered]', $h['Php-Auth-Pw']);
         $this->assertSame('[Filtered]', $h['Authentication']);
-        $encoded = (string) json_encode($this->sender->lastPayload());
+        $encoded = (string) json_encode(self::withoutSource($this->sender->lastPayload()));
         $this->assertStringNotContainsString('super-secret-pw', $encoded);
         $this->assertStringNotContainsString('leak-me', $encoded);
     }

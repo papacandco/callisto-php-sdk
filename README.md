@@ -741,10 +741,17 @@ your application can report its own exceptions. Reporting is **fully disabled** 
 is configured.
 
 Each captured event carries the exception message, type, level, and a normalized stack trace
-that includes a **source window** — the failing line plus up to five lines of surrounding
-context — so the dashboard highlights exactly where the error occurred. (The window is omitted
-for the SDK's own transport errors, whose call sites could embed request data — see
-[PII guarantee](#pii-guarantee).)
+that includes a **source window** — the failing line plus up to ten lines of surrounding
+context on each side — so the dashboard highlights exactly where the error occurred. (The
+window is omitted for the SDK's own transport errors, whose call sites could embed request
+data — see [PII guarantee](#pii-guarantee).)
+
+The first frame is the line that raised the error, inside the function that raised it; a
+PHP warning or notice turned into an `ErrorException` by an error handler points at the
+faulting line, not at the handler. Each frame is flagged `in_app` unless it lives under
+`vendor/` or in this SDK. The event's **culprit** (the issue's location, part of how events
+are grouped) is the first `in_app` frame, `Class->method in path/from/project/root.php`; the
+request route is used only when no frame is in your code.
 
 > **Delivery is synchronous best-effort (PHP-specific).** PHP has no portable background
 > threads in a request context, so the reporter delivers each event **inline with a short

@@ -8,6 +8,7 @@ use Callisto\Sdk\ErrorReporter;
 use Callisto\Sdk\Exception\CallistoException;
 use Callisto\Sdk\Framework\Bowphp\CallistoErrorHandler;
 use Callisto\Sdk\Integration\CallistoIntegration;
+use Callisto\Sdk\Tests\ReporterTest;
 use Callisto\Sdk\Tests\Support\RecordingSender;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -140,7 +141,8 @@ class BowErrorHandlerTest extends TestCase
         $req = $sender->last()['request'];
         $this->assertSame('[Filtered]', $req['headers']['Authorization']);
         $this->assertSame('*/*', $req['headers']['Accept']);
-        // raw secret must not appear anywhere
-        $this->assertStringNotContainsString('Bearer secret', (string) json_encode($sender->last()));
+        // raw secret must not appear anywhere in the captured data (the source
+        // windows quote this test file, where it is a literal)
+        $this->assertStringNotContainsString('Bearer secret', (string) json_encode(ReporterTest::withoutSource($sender->last())));
     }
 }
