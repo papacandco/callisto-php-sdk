@@ -15,7 +15,8 @@
   "suggest": {
     "laravel/framework": "Auto-wires error reporting in Laravel via Callisto\\Sdk\\Framework\\Laravel\\CallistoServiceProvider (auto-discovered).",
     "symfony/http-kernel": "Enables the Symfony kernel.exception listener Callisto\\Sdk\\Framework\\Symfony\\CallistoExceptionListener.",
-    "bowphp/framework": "Enables the BowPHP error-handler reporter Callisto\\Sdk\\Framework\\Bowphp\\CallistoErrorHandler (wired via config/app.php error_handle)."
+    "bowphp/framework": "Enables the BowPHP error-handler reporter Callisto\\Sdk\\Framework\\Bowphp\\CallistoErrorHandler (wired via config/app.php error_handle).",
+    "psr/log": "Enables Callisto\\Sdk\\Logs\\PsrLogger, a PSR-3 logger that ships records to callisto-logs."
   },
   "autoload": {
     "psr-4": { "Callisto\\Sdk\\": "src/" }

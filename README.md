@@ -4,6 +4,7 @@ Official Callisto Signal SDK for PHP 8.1+. Two capabilities in one package:
 
 - **Messaging API** — SMS, OTP, WhatsApp, Notify, and balance, over a typed, Guzzle-backed client. See [Quick start](#quick-start) and [Resources](#resources).
 - **Error tracking** — opt-in, Sentry-style exception reporting with a source window on the failing line, plus drop-in **Laravel, Symfony and BowPHP** integrations. See [Error reporting](#error-reporting) → [Framework integration](#framework-integration).
+- **Logs** — ship your application's own log lines to callisto-logs (OTLP/HTTP), with trace correlation and a PSR-3 adapter. See [Logs](#logs).
 
 ## Requirements
 
@@ -907,3 +908,153 @@ try {
     throw $e;
 }
 ```
+
+## Logs
+
+The SDK can ship your application's own log lines to **callisto-logs**, without an
+OpenTelemetry SDK. (Already running an OpenTelemetry SDK or Collector? Keep using it; this is for
+apps that do not.) Records are queued, batched and sent as OTLP JSON to
+`https://logs.callistosignal.com/v1/logs`. A log call never throws.
+
+> **Do not log passwords, tokens, card numbers or other secrets.** The SDK does not scrub what
+> you log. callisto-logs masks sensitive keys and, by default, e-mails, IPs and phone numbers,
+> but that is a safety net, not a licence (platform terms, CGU 7.6).
+
+### Create a Logs key
+
+Logs use their own API key, of scope **Logs**: in the dashboard, **Organization → API keys**
+(or **Monitoring → Logs → Sources**). It has an access key `pk_…` (32 lowercase hex characters
+after the prefix) and a secret `sk_…` (48). A messaging key (`clientId` / `apiKey`) does not work
+for logs, and a Logs key does not work for the messaging API.
+
+### Configuration
+
+Each setting is taken from the argument, then from the environment:
+
+| Logger argument | Client argument | Env var | Default |
+| --- | --- | --- | --- |
+| `accessKey` | `logsAccessKey` | `CALLISTO_LOGS_ACCESS_KEY` | none |
+| `secret` | `logsSecret` | `CALLISTO_LOGS_SECRET` | none |
+| `endpoint` | `logsEndpoint` | `CALLISTO_LOGS_ENDPOINT` | `https://logs.callistosignal.com/v1/logs` |
+| `serviceName` | `serviceName` | `CALLISTO_SERVICE_NAME`, then `OTEL_SERVICE_NAME` | `unknown_service` |
+| `environment` | `environment` | `CALLISTO_ENVIRONMENT` | none |
+
+- No key and no secret: logs are **disabled**. Every call is a cheap no-op and nothing is sent.
+- Only one of the two, a value that is not a well-formed `pk_` / `sk_` key, or an endpoint that
+  is not an absolute `http(s)` URL: the constructor throws `InvalidArgumentException` (the same
+  configuration error as missing messaging credentials), so a typo does not silently lose every
+  log.
+- `serviceName` is sent as the OTel resource `service.name`, `environment` as
+  `deployment.environment.name`.
+
+### Quick start
+
+Standalone, no messaging credentials needed:
+
+```php
+use Callisto\Sdk\Logs\Logger;
+
+$logs = new Logger(
+    accessKey: 'pk_…',          // or CALLISTO_LOGS_ACCESS_KEY
+    secret: 'sk_…',             // or CALLISTO_LOGS_SECRET
+    serviceName: 'checkout',    // or CALLISTO_SERVICE_NAME
+    environment: 'production',  // or CALLISTO_ENVIRONMENT
+);
+
+$logs->info('order paid', ['order_id' => 42, 'paid' => true]);
+$logs->warn('stock low', ['sku' => 'A-12', 'left' => 3]);
+$logs->error('charge failed', ['provider' => 'hub2', 'attempt' => 2]);
+$logs->log('debug', 'cart', ['items' => [['sku' => 'A-12', 'qty' => 1]]]);
+```
+
+On the messaging client, the same logger is `$client->logs` (or `$client->logs()`). It is a
+no-op logger when no Logs key resolves, and it never uses `clientId` / `apiKey`:
+
+```php
+use Callisto\Sdk\Client;
+
+$callisto = new Client(
+    clientId: 'your-client-id',
+    apiKey: 'your-api-key',
+    logsAccessKey: 'pk_…',
+    logsSecret: 'sk_…',
+    serviceName: 'checkout',
+);
+
+$callisto->logs->info('sms sent', ['to_country' => 'CI']);
+$callisto->flush(); // also flushes the logs; $callisto->close() flushes then closes the logger
+```
+
+Methods: `debug`, `info`, `warn`, `error`, `fatal` (each `(message, attributes = [])`),
+`log(level, message, attributes = [])`, `flush()`, `close()`, plus `isEnabled()` and
+`droppedCount()` for diagnostics. The message is converted to a string. Attribute values can be
+strings, booleans, integers, floats, `null` (omitted), lists and maps (nested up to 5 levels);
+other values are converted to strings.
+
+Limits: the message is cut to 32 768 characters and each string attribute to 8 192 (the cut
+ends with `…`), at most 128 attributes per record.
+
+### Trace correlation
+
+Pass `trace_id` (32 hex characters, not all zeros) and, optionally, `span_id` (16 hex
+characters) as attributes. They are moved to the record's `traceId` / `spanId`, which ties the
+log to the trace, and through `context.trace.trace_id` to the matching error issue. An invalid
+value stays an ordinary attribute.
+
+```php
+$logs->error('payment declined', [
+    'trace_id' => '5b8efff798038103d269b633813fc60c',
+    'span_id' => 'eee19b7ec3c1b174',
+    'order_id' => 42,
+]);
+```
+
+### PSR-3 adapter
+
+With [`psr/log`](https://packagist.org/packages/psr/log) installed (it is a `suggest`, not a
+requirement; Laravel, Symfony and Monolog already bring it), `Callisto\Sdk\Logs\PsrLogger`
+implements `Psr\Log\LoggerInterface` and forwards to a `Logger`:
+
+```php
+use Callisto\Sdk\Logs\PsrLogger;
+
+$psr = new PsrLogger($logs, 'app'); // the optional name is sent as `logger.name`
+
+$psr->info('User {user} paid {amount}', ['user' => 'awa', 'amount' => 1500]);
+$psr->error('charge failed', ['exception' => $e, 'order_id' => 42]);
+```
+
+- `{placeholder}`s are interpolated from the context (PSR-3); the context keys are also sent as
+  attributes.
+- `context['exception']` (a `Throwable`) becomes `exception.type`, `exception.message` and
+  `exception.stacktrace`.
+- Levels: `debug` → debug; `info`, `notice` → info; `warning` → warn; `error`, `critical`,
+  `alert` → error; `emergency` → fatal. An unknown level is logged as info; the adapter never
+  throws.
+- A record logged into the adapter while it is sending (for example by an HTTP client that logs
+  through the same PSR-3 logger) is dropped, never re-shipped.
+
+### Delivery (PHP: synchronous)
+
+PHP has no portable background thread in a request, so the PHP logger differs from the other
+SDKs:
+
+- records are queued in memory (at most 2 000; when full, new records are dropped and counted
+  in `droppedCount()`);
+- a batch is sent **synchronously** when 100 records are queued, on `flush()` / `close()`, and
+  from a shutdown function registered once per logger, so a normal request ships its logs when
+  it ends;
+- a request carries at most 500 records or about 1 MB, with a **2 s connect / 3 s total**
+  timeout, and is **not retried**: a failed batch is dropped, so a slow ingest never holds a
+  request for long. One `flush()` stops sending new batches after 5 s;
+- after a `401` or `403` (bad key, or the plan has no logs) sending pauses 60 s; records logged
+  during the pause are dropped.
+
+In a long-running process (queue worker, daemon), call `$logs->flush()` at the end of each job,
+otherwise records wait until 100 are queued or the process exits. Under PHP-FPM, calling
+`fastcgi_finish_request()` before the end of the script sends the response first, so the
+shutdown flush does not delay it.
+
+The logger uses its own HTTP path: it never sends `clientId` / `apiKey` to callisto-logs, and
+never sends the Logs secret anywhere else. Its own failures are swallowed; they never reach the
+error reporter and are never logged through the logger itself.

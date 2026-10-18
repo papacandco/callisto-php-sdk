@@ -6,6 +6,8 @@ namespace Callisto\Sdk;
 
 use Callisto\Sdk\Error\Sender;
 use Callisto\Sdk\Http\Transport;
+use Callisto\Sdk\Logs\Logger;
+use Callisto\Sdk\Logs\Sender as LogsSender;
 use Callisto\Sdk\Resource\Balance;
 use Callisto\Sdk\Resource\Notify;
 use Callisto\Sdk\Resource\Otp;
@@ -16,6 +18,14 @@ use Throwable;
 
 final class Client
 {
+    /**
+     * Log shipping to callisto-logs. Built from the logs* arguments (or the
+     * CALLISTO_LOGS_* env vars); a no-op logger when no Logs key resolves. It
+     * never uses the messaging credentials, and its key never reaches the
+     * messaging API.
+     */
+    public readonly Logger $logs;
+
     private readonly Transport $transport;
     private readonly ErrorReporter $reporter;
     private bool $unhandledInstalled = false;
@@ -35,6 +45,11 @@ final class Client
         ?bool $captureUnhandled = null,
         ?string $environment = null,
         ?Sender $errorSender = null,
+        ?string $logsAccessKey = null,
+        ?string $logsSecret = null,
+        ?string $logsEndpoint = null,
+        ?string $serviceName = null,
+        ?LogsSender $logsSender = null,
     ) {
         $config = Config::resolve(
             $clientId,
@@ -47,6 +62,14 @@ final class Client
         );
         $this->reporter = new ErrorReporter($config->errorDsn, $config->environment, $errorSender);
         $this->transport = new Transport($config, $httpClient, $this->reporter);
+        $this->logs = new Logger(
+            accessKey: $logsAccessKey,
+            secret: $logsSecret,
+            endpoint: $logsEndpoint,
+            serviceName: $serviceName,
+            environment: $config->environment,
+            sender: $logsSender,
+        );
 
         if ($config->captureUnhandled && $this->reporter->isEnabled()) {
             $this->installUnhandledHandler();
@@ -117,12 +140,27 @@ final class Client
         $this->reporter->setUser($user);
     }
 
+    /** The same logger as {@see $logs}. */
+    public function logs(): Logger
+    {
+        return $this->logs;
+    }
+
     /**
-     * Drain pending sends (no-op for the synchronous PHP reporter).
+     * Drain pending sends: the queued log records (the error reporter is
+     * synchronous and has nothing pending).
      */
     public function flush(): void
     {
         $this->reporter->flush();
+        $this->logs->flush();
+    }
+
+    /** Flush, then close the logger (later log calls are no-ops). */
+    public function close(): void
+    {
+        $this->reporter->flush();
+        $this->logs->close();
     }
 
     /**
