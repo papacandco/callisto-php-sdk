@@ -917,13 +917,13 @@ apps that do not.) Records are queued, batched and sent as OTLP JSON to
 `https://logs.callistosignal.com/v1/logs`. A log call never throws.
 
 > **Do not log passwords, tokens, card numbers or other secrets.** The SDK does not scrub what
-> you log. callisto-logs masks sensitive keys and, by default, e-mails, IPs and phone numbers,
-> but that is a safety net, not a licence (platform terms, CGU 7.6).
+> you log, and callisto-logs stores it as received: nothing is masked. Remove secrets and personal
+> data you do not need before logging (platform terms, CGU 7.6).
 
 ### Create a Logs key
 
 Logs use their own API key, of scope **Logs**: in the dashboard, **Organization → API keys**
-(or **Monitoring → Logs → Sources**). It has an access key `pk_…` (32 lowercase hex characters
+(or **Monitoring → Logs → Ingest keys**). It has an access key `pk_…` (32 lowercase hex characters
 after the prefix) and a secret `sk_…` (48). A messaging key (`clientId` / `apiKey`) does not work
 for logs, and a Logs key does not work for the messaging API.
 
